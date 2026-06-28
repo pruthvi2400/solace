@@ -1,0 +1,6 @@
+{
+  "name": "Solace",
+  "description": "An emotional companion designed to help people navigating heartbreak, breakups, emotional loss, or loneliness process their feelings and rebuild their lives.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
