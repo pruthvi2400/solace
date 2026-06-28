@@ -4,13 +4,24 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
+import connectDB from "./server/config/db";
+import authRoutes from "./server/routes/authRoutes";
 
 dotenv.config();
 
-const app = express();
-const PORT = 3000;
+// Connect to database
+connectDB();
 
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Body parser
 app.use(express.json());
+
+// Cookie parser
+app.use(cookieParser());
+
 
 // Path to persist database
 const DATA_DIR = path.join(process.cwd(), "data");
@@ -126,22 +137,13 @@ if (!fs.existsSync(DB_FILE)) {
   writeDB(DEFAULT_STATE);
 }
 
-// API Routes
-app.get("/api/state", (req, res) => {
-  const data = readDB();
-  res.json(data);
-});
+// Mount routers
+app.use("/api/auth", authRoutes);
 
-app.post("/api/state", (req, res) => {
-  const updatedState = req.body;
-  if (!updatedState || typeof updatedState !== "object") {
-    return res.status(400).json({ error: "Invalid state object" });
-  }
-  const current = readDB();
-  // Merge state safely to prevent data loss
-  const merged = { ...current, ...updatedState };
-  writeDB(merged);
-  res.json({ success: true, state: merged });
+// TODO: Implement proper error handling middleware
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error(err.stack);
+  res.status(500).send("Something broke!");
 });
 
 // Empathy-first offline system replies for when Gemini key is missing
@@ -150,35 +152,55 @@ function getOfflineReply(message: string, onboardingName: string) {
   const nameLabel = onboardingName ? `, ${onboardingName}` : "";
 
   if (msg.includes("miss") || msg.includes("love") || msg.includes("want them")) {
-    return `It is completely understandable to miss them deeply${nameLabel}. When we share a piece of our lives with someone, their absence leaves a real, physical space that hurts. Missing them doesn't mean you're sliding backward; it simply means your love was real. Be gentle with yourself. Would it help to write down what you miss most right now, rather than sending it to them?`;
+    return `It is completely understandable to miss them deeply${nameLabel}. When we share a piece of our lives with someone, their absence leaves a real, physical space that hurts. Missing them doesn\'t mean you\'re sliding backward; it simply means your love was real. Be gentle with yourself. Would it help to write down what you miss most right now, rather than sending it to them?`;
   }
   if (msg.includes("text") || msg.includes("contact") || msg.includes("call") || msg.includes("reach out")) {
-    return `I hear how strong the urge to reach out is right now${nameLabel}. That is your heart seeking comfort in a place it was used to finding it. But remember why you chose this space. Let's practice a 30-minute pause. Write down exactly what you wanted to text them right here in our private space instead. Let the words land here. I'm right here with you.`;
+    return `I hear how strong the urge to reach out is right now${nameLabel}. That is your heart seeking comfort in a place it was used to finding it. But remember why you chose this space. Let\'s practice a 30-minute pause. Write down exactly what you wanted to text them right here in our private space instead. Let the words land here. I\'m right here with you.`;
   }
   if (msg.includes("sad") || msg.includes("cry") || msg.includes("hurts") || msg.includes("grief") || msg.includes("pain")) {
-    return `I am so sorry it hurts this much today${nameLabel}. Please let the tears flow if they need to; crying is a physical release and a necessary step of healing. Do not feel pressured to 'get over it.' Your grief is valid, and there is no timeline. You are safe here. Can we take three deep breaths together?`;
+    return `I am so sorry it hurts this much today${nameLabel}. Please let the tears flow if they need to; crying is a physical release and a necessary step of healing. Do not feel pressured to \'get over it.\' Your grief is valid, and there is no timeline. You are safe here. Can we take three deep breaths together?`;
   }
   if (msg.includes("lonely") || msg.includes("alone") || msg.includes("nobody")) {
-    return `Feeling alone is one of the heaviest parts of heartbreak${nameLabel}. But please remember: you are not truly alone in your healing. I am here with you, and there is an entire community of people who understand exactly what this silence feels like. Let's focus on just getting through this next hour. What is one small, warm thing we can do for you right now?`;
+    return `Feeling alone is one of the heaviest parts of heartbreak${nameLabel}. But please remember: you are not truly alone in your healing. I am here with you, and there is an entire community of people who understand exactly what this silence feels like. Let\'s focus on just getting through this next hour. What is one small, warm thing we can do for you right now?`;
   }
   if (msg.includes("regret") || msg.includes("my fault") || msg.includes("blame") || msg.includes("should have")) {
     return `It is so easy to play back old memories and blame ourselves for how things ended${nameLabel}. But relationships are complex systems, and healing requires letting go of the burden of perfection. Please offer yourself the same compassion you would offer a dear friend in this exact position. You did the best you could with the knowledge you had.`;
   }
-  return `Thank you for sharing that with me${nameLabel}. I'm listening closely, and I want you to know that your feelings are entirely valid. You don't have to carry all of this on your own. What else is on your mind? I'm right here.`;
+  return `Thank you for sharing that with me${nameLabel}. I\'m listening closely, and I want you to know that your feelings are entirely valid. You don\'t have to carry all of this on your own. What else is on your mind? I\'m right here.`;
 }
 
 // Core Chat Endpoint
-app.post("/api/chat", async (req, res) => {
+app.post("/api/chat", async (req: Request, res: Response, next: NextFunction) => {
+  // For now, continue to use readDB and writeDB for chat-related state that is not directly user authentication
+  // In a full implementation, this state would be fetched/updated based on the authenticated user.
+  const dbState = readDB(); // This will need to be replaced with user-specific data from MongoDB
+
   const { message, history } = req.body;
   if (!message) {
     return res.status(400).json({ error: "Message is required" });
   }
 
-  const dbState = readDB();
-  const userName = dbState.onboarding?.name || "Friend";
-  const userFeeling = dbState.onboarding?.feeling || "hurting";
-  const userReasons = dbState.onboarding?.reasons?.join(", ") || "healing";
-  const userGoals = dbState.onboarding?.goals?.join(", ") || "building routines";
+  // Assume user is authenticated and get their ID from req.user
+  const userId = (req as any).user?.id; 
+  let userName = "Friend";
+  let userFeeling = "hurting";
+  let userReasons = "healing";
+  let userGoals = "building routines";
+
+  if (userId) {
+    try {
+      const user = await User.findById(userId); // Fetch user from MongoDB
+      if (user) {
+        // For now, map existing dbState properties to the user for AI context
+        // In a real app, user data would directly contain these
+        userName = user.name || "Friend";
+        // TODO: Load user-specific onboarding/feelings/goals from MongoDB after user schema is extended.
+        // For now, we will use default values or the existing dbState as a temporary fallback.
+      }
+    } catch (error) {
+      console.error("Error fetching user for AI chat:", error);
+    }
+  }
 
   const aiClient = getGeminiAI();
 
@@ -203,7 +225,7 @@ app.post("/api/chat", async (req, res) => {
       1. COMPASSION BEFORE ADVICE: Never rush to give solutions. First, validate their pain, sadness, or anger completely. Let them know they are safe.
       2. EMOTIONALLY INTELLIGENT WRITING: Talk like a warm, supportive friend or gentle guide. Use warm, humble, human-centered language. Do NOT sound clinical, corporate, or mechanical.
       3. PROGRESS IS NOT LINEAR: If they are having a relapse (e.g., missed someone, texted an ex, stayed in bed), never shame them. Remind them that setbacks are a normal, beautiful part of human recovery.
-      4. DO NOT PRESSSURE: Never use words like 'you should just move on', 'plenty of fish in the sea', 'get over it', or 'forget about them'. Instead, say things like 'It makes perfect sense that you feel this way', 'That love was real, and so is the grief.'
+      4. DO NOT PRESSSURE: Never use words like \'you should just move on\', \'plenty of fish in the sea\', \'get over it\', or \'forget about them\'. Instead, say things like \'It makes perfect sense that you feel this way\', \'That love was real, and so is the grief.\'
       5. GENTLE ACTION COAXING: Only after validating and listening, you may gently invite them to perform a small self-care activity (e.g., a deep breath, drinking water, looking out the window).
       6. IF THEY TEMPT TO CONTACT THE EX: Remind them of their goals or why they started healing. Suggest writing the message privately here instead. Suggest a 30-minute pause to see if the urge cools down.
 
@@ -236,7 +258,7 @@ app.post("/api/chat", async (req, res) => {
       }
     });
 
-    const responseText = response.text || "I'm here, holding space for you. Tell me more of what you're feeling.";
+    const responseText = response.text || "I\'m here, holding space for you. Tell me more of what you\'re feeling.";
     res.json({ text: responseText });
 
   } catch (error: any) {
@@ -247,12 +269,26 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Emergency Chat Endpoint (for "I'm about to text them")
-app.post("/api/emergency/chat", async (req, res) => {
+// Emergency Chat Endpoint (for "I\'m about to text them")
+app.post("/api/emergency/chat", async (req: Request, res: Response, next: NextFunction) => {
   const { message } = req.body;
-  const dbState = readDB();
-  const userName = dbState.onboarding?.name || "Friend";
-  const userReasons = dbState.onboarding?.reasons || [];
+  // Assume user is authenticated and get their ID from req.user
+  const userId = (req as any).user?.id;
+  let userName = "Friend";
+  let userReasons: string[] = [];
+
+  if (userId) {
+    try {
+      const user = await User.findById(userId);
+      if (user) {
+        userName = user.name || "Friend";
+        // TODO: Load user-specific reasons from MongoDB after user schema is extended.
+      }
+    } catch (error) {
+      console.error("Error fetching user for emergency chat:", error);
+    }
+  }
+
   const reasonText = userReasons.length > 0 
     ? `They started this journey to: ${userReasons.join(", ")}.` 
     : "They are trying to heal and rebuild their strength.";
@@ -261,17 +297,17 @@ app.post("/api/emergency/chat", async (req, res) => {
 
   if (!aiClient) {
     return res.json({
-      text: `Please pause, ${userName}. Before you hit send, let's take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I'm right here with you, and we can wait 30 minutes together to see how you feel.`
+      text: `Please pause, ${userName}. Before you hit send, let\'s take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I\'m right here with you, and we can wait 30 minutes together to see how you feel.`
     });
   }
 
   try {
     const systemInstruction = `
       You are Solace in "Emergency Contact Buffer Mode".
-      The user is experiencing a powerful, immediate urge to text or call their ex-partner. They pressed 'I'm about to text them'.
+      The user is experiencing a powerful, immediate urge to text or call their ex-partner. They pressed \'I\'m about to text them\'.
       
       User name: ${userName}
-      User's initial reasons for healing: ${reasonText}
+      User\'s initial reasons for healing: ${reasonText}
 
       Your task:
       1. ACT AS AN EMOTIONAL BUFFER: Your goal is to create a 30-minute pause between their urge and their action.
@@ -286,7 +322,7 @@ app.post("/api/emergency/chat", async (req, res) => {
 
     const response = await aiClient.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: message || "I'm about to text them. Help me.",
+      contents: message || "I\'m about to text them. Help me.",
       config: {
         systemInstruction,
         temperature: 0.5,
@@ -297,7 +333,7 @@ app.post("/api/emergency/chat", async (req, res) => {
   } catch (error) {
     console.error("Emergency chat error:", error);
     res.json({
-      text: `Please pause, ${userName}. Before you hit send, let's take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I'm right here with you, and we can wait 30 minutes together to see how you feel.`
+      text: `Please pause, ${userName}. Before you hit send, let\'s take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I\'m right here with you, and we can wait 30 minutes together to see how you feel.`
     });
   }
 });
