@@ -25,14 +25,57 @@ const UserSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-  // For future scalability: roles, reset tokens, etc.
-  // role: {
-  //   type: String,
-  //   enum: ['user', 'publisher'],
-  //   default: 'user',
-  // },
-  // resetPasswordToken: String,
-  // resetPasswordExpire: Date,
+  solaceState: {
+    type: Object,
+    default: {
+      onboarding: {
+        name: "",
+        reasons: [],
+        feeling: "lonely",
+        goals: [],
+        onboarded: false,
+      },
+      noContact: {
+        startDate: null,
+        relapsesCount: 0,
+        lastContactDate: null,
+      },
+      routines: [
+        { id: "1", text: "Drink water regularly", completed: false, category: "body" },
+        { id: "2", text: "Eat three nourishing meals", completed: false, category: "body" },
+        { id: "3", text: "Brush teeth and shower", completed: false, category: "body" },
+        { id: "4", text: "Step outside into nature for 10 min", completed: false, category: "soul" },
+        { id: "5", text: "Avoid checking their social media", completed: false, category: "mind" },
+        { id: "6", text: "Journal my raw feelings", completed: false, category: "mind" },
+        { id: "7", text: "Practice 5 minutes of deep breathing", completed: false, category: "soul" },
+        { id: "8", text: "Do one small thing that makes me smile", completed: false, category: "soul" }
+      ],
+      moods: [],
+      journals: [],
+      memories: [],
+      goals: [
+        { id: "g1", title: "Read 10 pages of a comforting book", category: "mind", progress: 0 },
+        { id: "g2", title: "Move my body (stretch, walk, or gym)", category: "body", progress: 0 },
+        { id: "g3", title: "Spend 20 mins learning a skill or language", category: "growth", progress: 0 },
+        { id: "g4", title: "Tidy up my room/desk space", category: "environment", progress: 0 }
+      ],
+      encouragement: {
+        affirmation: "You are allowed to feel everything you\"re feeling right now. Grief is not a sign of weakness, but a testament to how deeply you loved.",
+        quote: "Healing is not a linear climb, but a spiral path. Do not judge your progress by today\"s heavy weather.",
+        challenge: "Drink one warm cup of herbal tea or water, hold the mug in both hands, and take 5 slow, deep breaths.",
+        challengeCompleted: false,
+      },
+      privacy: { passcodeEnabled: false, passcode: "", aiMemoryEnabled: true, dataSharingConsent: true },
+      chatHistory: [
+        {
+          id: "welcome-" + Date.now(),
+          role: "model",
+          text: "Hello, I\"m Solace. I\"m here to listen, support, and stand by you. You don\"t have to carry this weight alone. How are you holding up right now?",
+          createdAt: new Date().toISOString()
+        }
+      ]
+    },
+  },
 });
 
 // Encrypt password using bcrypt
@@ -57,15 +100,56 @@ UserSchema.methods.comparePassword = async function (this: UserDocument, entered
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
+import { UserState } from "../../src/types"; // Assuming UserState is defined here
+
 interface UserDocument extends mongoose.Document {
   name: string;
   email: string;
   password: string;
   createdAt: Date;
+  solaceState: UserState; // Add solaceState to the UserDocument interface
   getSignedJwtToken(): string;
   comparePassword(enteredPassword: string): Promise<boolean>;
 }
 
 const User = mongoose.model<UserDocument>("User", UserSchema);
 
-export default User;
+export default User as mongoose.Model<UserDocument>;
+
+// Encrypt password using bcrypt
+UserSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) {
+    next();
+  }
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Sign JWT and return
+UserSchema.methods.getSignedJwtToken = function (this: UserDocument) {
+  return jwt.sign({ id: this._id }, process.env.JWT_SECRET as string, {
+    expiresIn: process.env.JWT_EXPIRE,
+  });
+};
+
+// Match user entered password to hashed password in database
+UserSchema.methods.comparePassword = async function (this: UserDocument, enteredPassword: string) {
+  return await bcrypt.compare(enteredPassword, this.password);
+};
+
+import { UserState } from "../../src/types"; // Assuming UserState is defined here
+
+interface UserDocument extends mongoose.Document {
+  name: string;
+  email: string;
+  password: string;
+  createdAt: Date;
+  solaceState: UserState; // Add solaceState to the UserDocument interface
+  getSignedJwtToken(): string;
+  comparePassword(enteredPassword: string): Promise<boolean>;
+}
+
+const User = mongoose.model<UserDocument>("User", UserSchema);
+
+export default User as mongoose.Model<UserDocument>;

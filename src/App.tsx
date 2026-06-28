@@ -7,9 +7,23 @@ import ReflectionsView from "./components/ReflectionsView";
 import SelfCareView from "./components/SelfCareView";
 import GrowthHubView from "./components/GrowthHubView";
 import SettingsView from "./components/SettingsView";
-import { Heart, Home, MessageSquare, BookOpen, Compass, Trophy, Settings, Lock, Unlock, HelpCircle } from "lucide-react";
+import LoginPage from "./components/LoginPage";
+import SignupPage from "./components/SignupPage";
+import { AuthProvider } from "./context/AuthContext";
+import { useAuth } from "./hooks/useAuth";
+import { Heart, Home, MessageSquare, BookOpen, Compass, Trophy, Settings, Lock, Unlock, HelpCircle, LogOut } from "lucide-react";
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const { user, loading: authLoading, logout } = useAuth();
+  const [isLoginView, setIsLoginView] = useState(true);
   const [state, setState] = useState<UserState | null>(null);
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [loadingState, setLoadingState] = useState(true);
@@ -19,9 +33,20 @@ export default function App() {
   const [passcodeAttempt, setPasscodeAttempt] = useState("");
   const [passcodeError, setPasscodeError] = useState(false);
 
-  // Fetch initial state on mount
+  // Fetch initial state on mount/auth state change
   useEffect(() => {
-    fetch("/api/state")
+    if (!user) {
+      setLoadingState(false);
+      return;
+    }
+    
+    setLoadingState(true);
+    const token = localStorage.getItem("token");
+    fetch("/api/state", {
+      headers: {
+        "Authorization": `Bearer ${token}`
+      }
+    })
       .then((res) => res.json())
       .then((data: UserState) => {
         setState(data);
@@ -34,7 +59,7 @@ export default function App() {
         console.error("Failed to load state from backend:", err);
         setLoadingState(false);
       });
-  }, []);
+  }, [user]);
 
   // Update unified state on backend and frontend
   const handleUpdateState = (updatedPartial: Partial<UserState>) => {
@@ -43,9 +68,13 @@ export default function App() {
     const merged = { ...state, ...updatedPartial };
     setState(merged);
 
+    const token = localStorage.getItem("token");
     fetch("/api/state", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
       body: JSON.stringify(updatedPartial),
     })
       .then((res) => res.json())
@@ -105,9 +134,13 @@ export default function App() {
     setIsAppLocked(false);
     setActiveTab("dashboard");
 
+    const token = localStorage.getItem("token");
     fetch("/api/state", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
       body: JSON.stringify(freshState),
     }).catch((err) => console.error("Failed to factory reset state:", err));
   };
@@ -128,7 +161,7 @@ export default function App() {
     }
   };
 
-  if (loadingState) {
+  if (authLoading || (user && loadingState)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-beige-100">
         <div className="text-center space-y-3">
@@ -139,6 +172,14 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (!user) {
+    if (isLoginView) {
+      return <LoginPage onTogglePage={() => setIsLoginView(false)} />;
+    } else {
+      return <SignupPage onTogglePage={() => setIsLoginView(true)} />;
+    }
   }
 
   if (!state) return null;
@@ -290,6 +331,14 @@ export default function App() {
             >
               <Settings className="w-4 h-4" />
               <span>Privacy settings</span>
+            </button>
+
+            <button
+              onClick={() => logout()}
+              className="w-full px-4 py-3 rounded-xl text-left text-xs font-semibold flex items-center gap-3 text-rose-700 hover:bg-rose-50 transition-all cursor-pointer mt-4"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Sign Out</span>
             </button>
           </nav>
         </div>

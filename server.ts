@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import connectDB from "./server/config/db";
 import authRoutes from "./server/routes/authRoutes";
+import User from "./server/models/User";
 
 dotenv.config();
 
@@ -14,7 +15,7 @@ dotenv.config();
 connectDB();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Body parser
 app.use(express.json());
@@ -141,7 +142,7 @@ if (!fs.existsSync(DB_FILE)) {
 app.use("/api/auth", authRoutes);
 
 // TODO: Implement proper error handling middleware
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+app.use((err: any, req: Request, res: Response, next: NextFunction): void => {
   console.error(err.stack);
   res.status(500).send("Something broke!");
 });
