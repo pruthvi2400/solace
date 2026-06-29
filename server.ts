@@ -141,6 +141,42 @@ if (!fs.existsSync(DB_FILE)) {
 // Mount routers
 app.use("/api/auth", authRoutes);
 
+// Get application state
+app.get("/api/state", (req: Request, res: Response) => {
+  const db = readDB();
+  res.json(db);
+});
+
+app.post("/api/state", (req: Request, res: Response) => {
+  const current = readDB();
+
+  const updated = {
+    ...DEFAULT_STATE,   // Always keep all default fields
+    ...current,         // Existing saved data
+    ...req.body,        // New incoming data
+
+    onboarding: {
+      ...DEFAULT_STATE.onboarding,
+      ...current.onboarding,
+      ...req.body.onboarding,
+    },
+  };
+
+  const success = writeDB(updated);
+
+  if (!success) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save state",
+    });
+  }
+
+  res.json({
+    success: true,
+    state: updated,
+  });
+});
+
 // TODO: Implement proper error handling middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction): void => {
   console.error(err.stack);

@@ -1,15 +1,19 @@
 {
   "onboarding": {
-    "name": "",
-    "reasons": [],
-    "feeling": "lonely",
-    "goals": [],
-    "onboarded": false
+    "name": "Pruthvi",
+    "reasons": [
+      "Something else"
+    ],
+    "feeling": "peaceful",
+    "goals": [
+      "Feel happier day-to-day"
+    ],
+    "onboarded": true
   },
   "noContact": {
-    "startDate": null,
-    "relapsesCount": 0,
-    "lastContactDate": null
+    "startDate": "2026-06-29T17:15:14.769Z",
+    "relapsesCount": 1,
+    "lastContactDate": "2026-06-29T17:15:14.769Z"
   },
   "routines": [
     {
@@ -107,7 +111,7 @@
       "id": "welcome",
       "role": "model",
       "text": "Hello, I'm Solace. I'm here to listen, support, and stand by you. You don't have to carry this weight alone. How are you holding up right now?",
-      "createdAt": "2026-06-29T04:18:25.882Z"
+      "createdAt": "2026-06-29T16:01:33.101Z"
     }
   ]
 }
