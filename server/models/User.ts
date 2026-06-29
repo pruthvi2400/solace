@@ -1,8 +1,19 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { UserState } from "../../src/types";
 
-const UserSchema = new mongoose.Schema({
+interface UserDocument extends mongoose.Document {
+  name: string;
+  email: string;
+  password: string;
+  createdAt: Date;
+  solaceState: UserState;
+  getSignedJwtToken(): string;
+  comparePassword(enteredPassword: string): Promise<boolean>;
+}
+
+const UserSchema = new mongoose.Schema<UserDocument>({
   name: {
     type: String,
     required: [true, "Please add a name"],
@@ -11,7 +22,8 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, "Please add an email"],
     unique: true,
-    match: [/^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/,
+    match: [
+      /^[\w-]+(?:\.[\w-]+)*@(?:[\w-]+\.)+[a-zA-Z]{2,7}$/,
       "Please add a valid email",
     ],
   },
@@ -19,7 +31,7 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, "Please add a password"],
     minlength: 6,
-    select: false, // Don't return password in queries
+    select: false,
   },
   createdAt: {
     type: Date,
@@ -60,96 +72,58 @@ const UserSchema = new mongoose.Schema({
         { id: "g4", title: "Tidy up my room/desk space", category: "environment", progress: 0 }
       ],
       encouragement: {
-        affirmation: "You are allowed to feel everything you\"re feeling right now. Grief is not a sign of weakness, but a testament to how deeply you loved.",
-        quote: "Healing is not a linear climb, but a spiral path. Do not judge your progress by today\"s heavy weather.",
-        challenge: "Drink one warm cup of herbal tea or water, hold the mug in both hands, and take 5 slow, deep breaths.",
+        affirmation:
+          "You are allowed to feel everything you're feeling right now. Grief is not a sign of weakness, but a testament to how deeply you loved.",
+        quote:
+          "Healing is not a linear climb, but a spiral path. Do not judge your progress by today's heavy weather.",
+        challenge:
+          "Drink one warm cup of herbal tea or water, hold the mug in both hands, and take 5 slow, deep breaths.",
         challengeCompleted: false,
       },
-      privacy: { passcodeEnabled: false, passcode: "", aiMemoryEnabled: true, dataSharingConsent: true },
+      privacy: {
+        passcodeEnabled: false,
+        passcode: "",
+        aiMemoryEnabled: true,
+        dataSharingConsent: true,
+      },
       chatHistory: [
         {
           id: "welcome-" + Date.now(),
           role: "model",
-          text: "Hello, I\"m Solace. I\"m here to listen, support, and stand by you. You don\"t have to carry this weight alone. How are you holding up right now?",
-          createdAt: new Date().toISOString()
-        }
-      ]
+          text: "Hello, I'm Solace. I'm here to listen, support, and stand by you. You don't have to carry this weight alone. How are you holding up right now?",
+          createdAt: new Date().toISOString(),
+        },
+      ],
     },
   },
 });
 
-// Encrypt password using bcrypt
-UserSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    next();
-  }
+// Hash password before saving
+UserSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
+
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
-  next();
 });
 
-// Sign JWT and return
-UserSchema.methods.getSignedJwtToken = function (this: UserDocument) {
-  return jwt.sign({ id: this._id }, process.env.JWT_SECRET as string, {
-    expiresIn: process.env.JWT_EXPIRE,
-  });
+// Generate JWT
+UserSchema.methods.getSignedJwtToken = function () {
+  return jwt.sign(
+    { id: this._id },
+    process.env.JWT_SECRET || "secret",
+    {
+      expiresIn: "7d",
+    }
+  );
 };
 
-// Match user entered password to hashed password in database
-UserSchema.methods.comparePassword = async function (this: UserDocument, enteredPassword: string) {
+// Compare passwords
+UserSchema.methods.comparePassword = async function (
+  enteredPassword: string
+) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
-import { UserState } from "../../src/types"; // Assuming UserState is defined here
-
-interface UserDocument extends mongoose.Document {
-  name: string;
-  email: string;
-  password: string;
-  createdAt: Date;
-  solaceState: UserState; // Add solaceState to the UserDocument interface
-  getSignedJwtToken(): string;
-  comparePassword(enteredPassword: string): Promise<boolean>;
-}
-
 const User = mongoose.model<UserDocument>("User", UserSchema);
 
-export default User as mongoose.Model<UserDocument>;
-
-// Encrypt password using bcrypt
-UserSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    next();
-  }
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
-
-// Sign JWT and return
-UserSchema.methods.getSignedJwtToken = function (this: UserDocument) {
-  return jwt.sign({ id: this._id }, process.env.JWT_SECRET as string, {
-    expiresIn: process.env.JWT_EXPIRE,
-  });
-};
-
-// Match user entered password to hashed password in database
-UserSchema.methods.comparePassword = async function (this: UserDocument, enteredPassword: string) {
-  return await bcrypt.compare(enteredPassword, this.password);
-};
-
-import { UserState } from "../../src/types"; // Assuming UserState is defined here
-
-interface UserDocument extends mongoose.Document {
-  name: string;
-  email: string;
-  password: string;
-  createdAt: Date;
-  solaceState: UserState; // Add solaceState to the UserDocument interface
-  getSignedJwtToken(): string;
-  comparePassword(enteredPassword: string): Promise<boolean>;
-}
-
-const User = mongoose.model<UserDocument>("User", UserSchema);
-
-export default User as mongoose.Model<UserDocument>;
+export default User;
