@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import connectDB from "./server/config/db";
 import authRoutes from "./server/routes/authRoutes";
+import stateRoutes from "./server/routes/stateRoutes";
 import User from "./server/models/User";
 
 dotenv.config();
@@ -23,71 +24,11 @@ app.use(express.json());
 // Cookie parser
 app.use(cookieParser());
 
+app.use("/api/auth", authRoutes);
+app.use("/api/state", stateRoutes);
+
 
 // Path to persist database
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
-
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-// Initial default state
-const DEFAULT_STATE = {
-  onboarding: {
-    name: "",
-    reasons: [],
-    feeling: "lonely",
-    goals: [],
-    onboarded: false,
-  },
-  noContact: {
-    startDate: null,
-    relapsesCount: 0,
-    lastContactDate: null,
-  },
-  routines: [
-    { id: "1", text: "Drink water regularly", completed: false, category: "body" },
-    { id: "2", text: "Eat three nourishing meals", completed: false, category: "body" },
-    { id: "3", text: "Brush teeth and shower", completed: false, category: "body" },
-    { id: "4", text: "Step outside into nature for 10 min", completed: false, category: "soul" },
-    { id: "5", text: "Avoid checking their social media", completed: false, category: "mind" },
-    { id: "6", text: "Journal my raw feelings", completed: false, category: "mind" },
-    { id: "7", text: "Practice 5 minutes of deep breathing", completed: false, category: "soul" },
-    { id: "8", text: "Do one small thing that makes me smile", completed: false, category: "soul" }
-  ],
-  moods: [],
-  journals: [],
-  memories: [],
-  goals: [
-    { id: "g1", title: "Read 10 pages of a comforting book", category: "mind", progress: 0 },
-    { id: "g2", title: "Move my body (stretch, walk, or gym)", category: "body", progress: 0 },
-    { id: "g3", title: "Spend 20 mins learning a skill or language", category: "growth", progress: 0 },
-    { id: "g4", title: "Tidy up my room/desk space", category: "environment", progress: 0 }
-  ],
-  encouragement: {
-    affirmation: "You are allowed to feel everything you're feeling right now. Grief is not a sign of weakness, but a testament to how deeply you loved.",
-    quote: "Healing is not a linear climb, but a spiral path. Do not judge your progress by today's heavy weather.",
-    challenge: "Drink one warm cup of herbal tea or water, hold the mug in both hands, and take 5 slow, deep breaths.",
-    challengeCompleted: false,
-  },
-  privacy: {
-    passcodeEnabled: false,
-    passcode: "",
-    aiMemoryEnabled: true,
-    dataSharingConsent: true,
-  },
-  chatHistory: [
-    {
-      id: "welcome",
-      role: "model",
-      text: "Hello, I'm Solace. I'm here to listen, support, and stand by you. You don't have to carry this weight alone. How are you holding up right now?",
-      createdAt: new Date().toISOString()
-    }
-  ]
-};
-
 // Lazy-loaded Gemini AI client
 let aiInstance: GoogleGenAI | null = null;
 function getGeminiAI() {
@@ -108,74 +49,6 @@ function getGeminiAI() {
   }
   return aiInstance;
 }
-
-// Read database
-function readDB() {
-  try {
-    if (fs.existsSync(DB_FILE)) {
-      const raw = fs.readFileSync(DB_FILE, "utf-8");
-      return JSON.parse(raw);
-    }
-  } catch (error) {
-    console.error("Error reading database file, using fallback:", error);
-  }
-  return DEFAULT_STATE;
-}
-
-// Write database
-function writeDB(data: any) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-    return true;
-  } catch (error) {
-    console.error("Error writing to database:", error);
-    return false;
-  }
-}
-
-// Ensure database file has valid initial state
-if (!fs.existsSync(DB_FILE)) {
-  writeDB(DEFAULT_STATE);
-}
-
-// Mount routers
-app.use("/api/auth", authRoutes);
-
-// Get application state
-app.get("/api/state", (req: Request, res: Response) => {
-  const db = readDB();
-  res.json(db);
-});
-
-app.post("/api/state", (req: Request, res: Response) => {
-  const current = readDB();
-
-  const updated = {
-    ...DEFAULT_STATE,   // Always keep all default fields
-    ...current,         // Existing saved data
-    ...req.body,        // New incoming data
-
-    onboarding: {
-      ...DEFAULT_STATE.onboarding,
-      ...current.onboarding,
-      ...req.body.onboarding,
-    },
-  };
-
-  const success = writeDB(updated);
-
-  if (!success) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to save state",
-    });
-  }
-
-  res.json({
-    success: true,
-    state: updated,
-  });
-});
 
 // TODO: Implement proper error handling middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction): void => {
@@ -210,7 +83,7 @@ function getOfflineReply(message: string, onboardingName: string) {
 app.post("/api/chat", async (req: Request, res: Response, next: NextFunction) => {
   // For now, continue to use readDB and writeDB for chat-related state that is not directly user authentication
   // In a full implementation, this state would be fetched/updated based on the authenticated user.
-  const dbState = readDB(); // This will need to be replaced with user-specific data from MongoDB
+  // This will need to be replaced with user-specific data from MongoDB
 
   const { message, history } = req.body;
   if (!message) {

@@ -48,36 +48,19 @@ const UserSchema = new mongoose.Schema<UserDocument>({
         onboarded: false,
       },
       noContact: {
-        startDate: null,
+        startDate: "",
         relapsesCount: 0,
-        lastContactDate: null,
+        lastContactDate: "",
       },
-      routines: [
-        { id: "1", text: "Drink water regularly", completed: false, category: "body" },
-        { id: "2", text: "Eat three nourishing meals", completed: false, category: "body" },
-        { id: "3", text: "Brush teeth and shower", completed: false, category: "body" },
-        { id: "4", text: "Step outside into nature for 10 min", completed: false, category: "soul" },
-        { id: "5", text: "Avoid checking their social media", completed: false, category: "mind" },
-        { id: "6", text: "Journal my raw feelings", completed: false, category: "mind" },
-        { id: "7", text: "Practice 5 minutes of deep breathing", completed: false, category: "soul" },
-        { id: "8", text: "Do one small thing that makes me smile", completed: false, category: "soul" }
-      ],
+      routines: [],
       moods: [],
       journals: [],
       memories: [],
-      goals: [
-        { id: "g1", title: "Read 10 pages of a comforting book", category: "mind", progress: 0 },
-        { id: "g2", title: "Move my body (stretch, walk, or gym)", category: "body", progress: 0 },
-        { id: "g3", title: "Spend 20 mins learning a skill or language", category: "growth", progress: 0 },
-        { id: "g4", title: "Tidy up my room/desk space", category: "environment", progress: 0 }
-      ],
+      goals: [],
       encouragement: {
-        affirmation:
-          "You are allowed to feel everything you're feeling right now. Grief is not a sign of weakness, but a testament to how deeply you loved.",
-        quote:
-          "Healing is not a linear climb, but a spiral path. Do not judge your progress by today's heavy weather.",
-        challenge:
-          "Drink one warm cup of herbal tea or water, hold the mug in both hands, and take 5 slow, deep breaths.",
+        affirmation: "",
+        quote: "",
+        challenge: "",
         challengeCompleted: false,
       },
       privacy: {
@@ -90,7 +73,7 @@ const UserSchema = new mongoose.Schema<UserDocument>({
         {
           id: "welcome-" + Date.now(),
           role: "model",
-          text: "Hello, I'm Solace. I'm here to listen, support, and stand by you. You don't have to carry this weight alone. How are you holding up right now?",
+          text: "Hello, I\"m Solace. I\"m here to listen, support, and stand by you. You don\"t have to carry this weight alone. How are you holding up right now?",
           createdAt: new Date().toISOString(),
         },
       ],

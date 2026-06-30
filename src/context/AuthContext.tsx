@@ -80,7 +80,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (data.success) {
         localStorage.setItem("token", data.token);
         // Fetch current user details
-        const meRes = await fetch("/api/auth/me");
+        const meRes = await fetch("/api/auth/me", {
+          headers: {
+            "Authorization": `Bearer ${data.token}`,
+          },
+        });
         const meData = await meRes.json();
         if (meData.success && meData.data) {
           setUser({
@@ -118,7 +122,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (data.success) {
         localStorage.setItem("token", data.token);
         // Fetch current user details
-        const meRes = await fetch("/api/auth/me");
+        const meRes = await fetch("/api/auth/me", {
+          headers: {
+            "Authorization": `Bearer ${data.token}`,
+          },
+        });
         const meData = await meRes.json();
         if (meData.success && meData.data) {
           setUser({
