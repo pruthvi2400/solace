@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import fs from "fs";
+import axios from "axios";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -9,6 +10,9 @@ import connectDB from "./server/config/db";
 import authRoutes from "./server/routes/authRoutes";
 import stateRoutes from "./server/routes/stateRoutes";
 import User from "./server/models/User";
+import { UserState } from "./server/models/UserState";
+import { DEFAULT_STATE } from "./server/config/defaultState";
+import { protect } from "./server/middleware/authMiddleware";
 
 dotenv.config();
 
@@ -50,10 +54,114 @@ function getGeminiAI() {
   return aiInstance;
 }
 
-// TODO: Implement proper error handling middleware
+// Unified response generator for Gemini & OpenRouter
+async function generateAIResponse(
+  message: string,
+  history: any[],
+  systemInstruction: string,
+  temperature: number = 0.7
+): Promise<string> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY") {
+    throw new Error("API key is not defined or is placeholder.");
+  }
+
+  if (key.startsWith("sk-")) {
+    // OpenRouter path
+    const response = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: systemInstruction },
+          ...(history || []).map((msg: any) => ({
+            role: msg.role === "model" ? "assistant" : "user",
+            content: msg.text,
+          })),
+          { role: "user", content: message },
+        ],
+        temperature,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const text = response.data?.choices?.[0]?.message?.content;
+    if (!text) {
+      throw new Error("Invalid response from OpenRouter API");
+    }
+    return text;
+  } else {
+    // Google GenAI path
+    const aiClient = getGeminiAI();
+    if (!aiClient) {
+      throw new Error("Failed to initialize Google GenAI client");
+    }
+
+    const contents: any[] = [];
+    if (history && Array.isArray(history)) {
+      history.forEach((msg: any) => {
+        contents.push({
+          role: msg.role === "model" ? "model" : "user",
+          parts: [{ text: msg.text }]
+        });
+      });
+    }
+
+    contents.push({
+      role: "user",
+      parts: [{ text: message }]
+    });
+
+    const response = await aiClient.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: contents,
+      config: {
+        systemInstruction,
+        temperature,
+      }
+    });
+
+    const text = response.text;
+    if (!text) {
+      throw new Error("Invalid response from Gemini API");
+    }
+    return text;
+  }
+}
+
+// Error handling middleware
 app.use((err: any, req: Request, res: Response, next: NextFunction): void => {
   console.error(err.stack);
-  res.status(500).send("Something broke!");
+
+  let statusCode = err.statusCode || 500;
+  let message = err.message || "Something went wrong. Please try again later.";
+
+  // Mongoose duplicate key (code 11000)
+  if (err.code === 11000) {
+    statusCode = 400;
+    message = "An account with this email already exists.";
+  }
+
+  // Mongoose validation error
+  if (err.name === "ValidationError") {
+    statusCode = 400;
+    message = Object.values(err.errors).map((val: any) => val.message).join(", ");
+  }
+
+  // Express validator errors passed via ErrorResponse
+  if (err.errors && Array.isArray(err.errors) && err.errors.length > 0) {
+    statusCode = 400;
+    message = err.errors[0].msg || err.message;
+  }
+
+  res.status(statusCode).json({
+    success: false,
+    error: message,
+  });
 });
 
 // Empathy-first offline system replies for when Gemini key is missing
@@ -80,43 +188,65 @@ function getOfflineReply(message: string, onboardingName: string) {
 }
 
 // Core Chat Endpoint
-app.post("/api/chat", async (req: Request, res: Response, next: NextFunction) => {
-  // For now, continue to use readDB and writeDB for chat-related state that is not directly user authentication
-  // In a full implementation, this state would be fetched/updated based on the authenticated user.
-  // This will need to be replaced with user-specific data from MongoDB
-
+app.post("/api/chat", protect, async (req: Request, res: Response, next: NextFunction) => {
   const { message, history } = req.body;
   if (!message) {
     return res.status(400).json({ error: "Message is required" });
   }
 
-  // Assume user is authenticated and get their ID from req.user
   const userId = (req as any).user?.id; 
   let userName = "Friend";
   let userFeeling = "hurting";
   let userReasons = "healing";
   let userGoals = "building routines";
 
+  let userState: any = null;
   if (userId) {
     try {
-      const user = await User.findById(userId); // Fetch user from MongoDB
-      if (user) {
-        // For now, map existing dbState properties to the user for AI context
-        // In a real app, user data would directly contain these
-        userName = user.name || "Friend";
-        // TODO: Load user-specific onboarding/feelings/goals from MongoDB after user schema is extended.
-        // For now, we will use default values or the existing dbState as a temporary fallback.
+      userState = await UserState.findOne({ user: userId });
+      if (!userState) {
+        userState = await UserState.create({ user: userId, ...DEFAULT_STATE });
+      }
+      if (userState.onboarding) {
+        userName = userState.onboarding.name || "Friend";
+        userFeeling = userState.onboarding.feeling || "hurting";
+        userReasons = (userState.onboarding.reasons && userState.onboarding.reasons.length > 0)
+          ? userState.onboarding.reasons.join(", ")
+          : "healing";
+        userGoals = (userState.onboarding.goals && userState.onboarding.goals.length > 0)
+          ? userState.onboarding.goals.join(", ")
+          : "building routines";
       }
     } catch (error) {
-      console.error("Error fetching user for AI chat:", error);
+      console.error("Error fetching/creating userState for AI chat:", error);
     }
   }
 
-  const aiClient = getGeminiAI();
+  // Save the user message to userState.chatHistory
+  const userMsg = {
+    id: "user-" + Date.now(),
+    role: "user",
+    text: message,
+    createdAt: new Date().toISOString(),
+  };
 
-  if (!aiClient) {
-    // Return high-fidelity offline fallback reply
+  if (userState) {
+    userState.chatHistory.push(userMsg);
+  }
+
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY") {
     const fallbackText = getOfflineReply(message, userName);
+    if (userState) {
+      const modelMsg = {
+        id: "model-" + Date.now(),
+        role: "model",
+        text: fallbackText,
+        createdAt: new Date().toISOString(),
+      };
+      userState.chatHistory.push(modelMsg);
+      await userState.save();
+    }
     return res.json({ text: fallbackText });
   }
 
@@ -135,54 +265,45 @@ app.post("/api/chat", async (req: Request, res: Response, next: NextFunction) =>
       1. COMPASSION BEFORE ADVICE: Never rush to give solutions. First, validate their pain, sadness, or anger completely. Let them know they are safe.
       2. EMOTIONALLY INTELLIGENT WRITING: Talk like a warm, supportive friend or gentle guide. Use warm, humble, human-centered language. Do NOT sound clinical, corporate, or mechanical.
       3. PROGRESS IS NOT LINEAR: If they are having a relapse (e.g., missed someone, texted an ex, stayed in bed), never shame them. Remind them that setbacks are a normal, beautiful part of human recovery.
-      4. DO NOT PRESSSURE: Never use words like \'you should just move on\', \'plenty of fish in the sea\', \'get over it\', or \'forget about them\'. Instead, say things like \'It makes perfect sense that you feel this way\', \'That love was real, and so is the grief.\'
+      4. DO NOT PRESSSURE: Never use words like 'you should just move on', 'plenty of fish in the sea', 'get over it', or 'forget about them'. Instead, say things like 'It makes perfect sense that you feel this way', 'That love was real, and so is the grief.'
       5. GENTLE ACTION COAXING: Only after validating and listening, you may gently invite them to perform a small self-care activity (e.g., a deep breath, drinking water, looking out the window).
       6. IF THEY TEMPT TO CONTACT THE EX: Remind them of their goals or why they started healing. Suggest writing the message privately here instead. Suggest a 30-minute pause to see if the urge cools down.
 
       Format your responses nicely with clean paragraphs. Keep them relatively concise (1-3 small paragraphs) so they fit nicely in a mobile-like chat window.
     `;
 
-    // Map history to Google GenAI Content structure
-    const contents: any[] = [];
-    if (history && Array.isArray(history)) {
-      history.forEach((msg: any) => {
-        contents.push({
-          role: msg.role === "model" ? "model" : "user",
-          parts: [{ text: msg.text }]
-        });
-      });
+    const responseText = await generateAIResponse(message, history, systemInstruction, 0.7);
+    if (userState) {
+      const modelMsg = {
+        id: "model-" + Date.now(),
+        role: "model",
+        text: responseText,
+        createdAt: new Date().toISOString(),
+      };
+      userState.chatHistory.push(modelMsg);
+      await userState.save();
     }
-
-    // Append current user message
-    contents.push({
-      role: "user",
-      parts: [{ text: message }]
-    });
-
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: contents,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      }
-    });
-
-    const responseText = response.text || "I\'m here, holding space for you. Tell me more of what you\'re feeling.";
     res.json({ text: responseText });
-
   } catch (error: any) {
-    console.error("Gemini API error inside chat:", error);
-    // Graceful fallback on API error
+    console.error("AI API error inside chat:", error);
     const fallbackText = getOfflineReply(message, userName);
+    if (userState) {
+      const modelMsg = {
+        id: "model-" + Date.now(),
+        role: "model",
+        text: fallbackText,
+        createdAt: new Date().toISOString(),
+      };
+      userState.chatHistory.push(modelMsg);
+      await userState.save();
+    }
     res.json({ text: fallbackText, note: "Fallback mode activated due to a connection issue." });
   }
 });
 
-// Emergency Chat Endpoint (for "I\'m about to text them")
+// Emergency Chat Endpoint (for "I'm about to text them")
 app.post("/api/emergency/chat", async (req: Request, res: Response, next: NextFunction) => {
   const { message } = req.body;
-  // Assume user is authenticated and get their ID from req.user
   const userId = (req as any).user?.id;
   let userName = "Friend";
   let userReasons: string[] = [];
@@ -192,7 +313,6 @@ app.post("/api/emergency/chat", async (req: Request, res: Response, next: NextFu
       const user = await User.findById(userId);
       if (user) {
         userName = user.name || "Friend";
-        // TODO: Load user-specific reasons from MongoDB after user schema is extended.
       }
     } catch (error) {
       console.error("Error fetching user for emergency chat:", error);
@@ -203,21 +323,20 @@ app.post("/api/emergency/chat", async (req: Request, res: Response, next: NextFu
     ? `They started this journey to: ${userReasons.join(", ")}.` 
     : "They are trying to heal and rebuild their strength.";
 
-  const aiClient = getGeminiAI();
-
-  if (!aiClient) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === "MY_GEMINI_API_KEY") {
     return res.json({
-      text: `Please pause, ${userName}. Before you hit send, let\'s take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I\'m right here with you, and we can wait 30 minutes together to see how you feel.`
+      text: `Please pause, ${userName}. Before you hit send, let's take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I'm right here with you, and we can wait 30 minutes together to see how you feel.`
     });
   }
 
   try {
     const systemInstruction = `
       You are Solace in "Emergency Contact Buffer Mode".
-      The user is experiencing a powerful, immediate urge to text or call their ex-partner. They pressed \'I\'m about to text them\'.
+      The user is experiencing a powerful, immediate urge to text or call their ex-partner. They pressed 'I'm about to text them'.
       
       User name: ${userName}
-      User\'s initial reasons for healing: ${reasonText}
+      User's initial reasons for healing: ${reasonText}
 
       Your task:
       1. ACT AS AN EMOTIONAL BUFFER: Your goal is to create a 30-minute pause between their urge and their action.
@@ -230,20 +349,17 @@ app.post("/api/emergency/chat", async (req: Request, res: Response, next: NextFu
       Keep your reply exceptionally warm, grounded, stable, and calming. Keep it to 2 short paragraphs max.
     `;
 
-    const response = await aiClient.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: message || "I\'m about to text them. Help me.",
-      config: {
-        systemInstruction,
-        temperature: 0.5,
-      }
-    });
-
-    res.json({ text: response.text });
+    const responseText = await generateAIResponse(
+      message || "I'm about to text them. Help me.",
+      [],
+      systemInstruction,
+      0.5
+    );
+    res.json({ text: responseText });
   } catch (error) {
     console.error("Emergency chat error:", error);
     res.json({
-      text: `Please pause, ${userName}. Before you hit send, let\'s take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I\'m right here with you, and we can wait 30 minutes together to see how you feel.`
+      text: `Please pause, ${userName}. Before you hit send, let's take a deep breath. Write down exactly what you want to say to them right here. Let it exit your mind, but keep it in this safe, private vault instead. I'm right here with you, and we can wait 30 minutes together to see how you feel.`
     });
   }
 });

@@ -15,6 +15,19 @@ import { AuthProvider } from "./context/AuthContext";
 import { useAuth } from "./hooks/useAuth";
 import { Heart, Home, MessageSquare, BookOpen, Compass, Trophy, Settings, Lock, Unlock, HelpCircle, LogOut } from "lucide-react";
 
+export function LoadingScreen() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-beige-100">
+      <div className="text-center space-y-3">
+        <div className="w-12 h-12 bg-sage-100 border border-sage-200 text-sage-600 rounded-full flex items-center justify-center animate-pulse mx-auto">
+          <Heart className="w-6 h-6 animate-pulse text-sage-500" />
+        </div>
+        <p className="font-serif text-sage-800 text-sm italic">Loading your quiet companion...</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <AuthProvider>
@@ -29,6 +42,7 @@ function AppContent() {
   const { user, loading: authLoading, logout } = useAuth();
   const [state, setState] = useState<UserState | null>(null);
   const [loadingState, setLoadingState] = useState(true);
+  const loadingUserState = loadingState || (!!user && !state);
   
   // Passcode lock simulator states
   const [isAppLocked, setIsAppLocked] = useState(false);
@@ -158,17 +172,8 @@ function AppContent() {
     navigate("/", { replace: true });
   };
 
-  if (authLoading || (user && loadingState)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-beige-100">
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 bg-sage-100 border border-sage-200 text-sage-600 rounded-full flex items-center justify-center animate-pulse mx-auto">
-            <Heart className="w-6 h-6 animate-pulse text-sage-500" />
-          </div>
-          <p className="font-serif text-sage-800 text-sm italic">Loading your quiet companion...</p>
-        </div>
-      </div>
-    );
+  if (authLoading || (user && loadingUserState)) {
+    return <LoadingScreen />;
   }
 
   return (
@@ -176,19 +181,45 @@ function AppContent() {
       {/* Public Routes */}
       <Route
         path="/signin"
-        element={!user ? <LoginPage onTogglePage={() => navigate("/signup")} /> : <Navigate to="/" replace />}
+        element={
+          !user ? (
+            <LoginPage onTogglePage={() => navigate("/signup")} />
+          ) : state && !state.onboarding?.onboarded ? (
+            <Navigate to="/onboarding" replace />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
       />
       <Route
         path="/signup"
-        element={!user ? <SignupPage onTogglePage={() => navigate("/signin")} /> : <Navigate to="/" replace />}
+        element={
+          !user ? (
+            <SignupPage onTogglePage={() => navigate("/signin")} />
+          ) : state && !state.onboarding?.onboarded ? (
+            <Navigate to="/onboarding" replace />
+          ) : (
+            <Navigate to="/" replace />
+          )
+        }
       />
       <Route
         path="/onboarding"
-        element={user && state ? <Onboarding onComplete={handleOnboardingComplete} /> : <Navigate to="/signin" replace />}
+        element={
+          user && state ? (
+            state.onboarding?.onboarded ? (
+              <Navigate to="/" replace />
+            ) : (
+              <Onboarding onComplete={handleOnboardingComplete} />
+            )
+          ) : (
+            <Navigate to="/signin" replace />
+          )
+        }
       />
 
       {/* Protected Routes */}
-      <Route element={<AppLayout user={user} state={state} onUpdateState={handleUpdateState} onResetApp={handleResetApp} isAppLocked={isAppLocked} setIsAppLocked={setIsAppLocked} handleUnlock={handleUnlock} passcodeAttempt={passcodeAttempt} setPasscodeAttempt={setPasscodeAttempt} passcodeError={passcodeError} setPasscodeError={setPasscodeError} logout={logout} />}>
+      <Route element={<AppLayout user={user} state={state} loadingUserState={loadingUserState} onUpdateState={handleUpdateState} onResetApp={handleResetApp} isAppLocked={isAppLocked} setIsAppLocked={setIsAppLocked} handleUnlock={handleUnlock} passcodeAttempt={passcodeAttempt} setPasscodeAttempt={setPasscodeAttempt} passcodeError={passcodeError} setPasscodeError={setPasscodeError} logout={logout} />}>
         <Route
           path="/"
           element={
@@ -229,6 +260,7 @@ function AppContent() {
 interface AppLayoutProps {
   user: any;
   state: UserState | null;
+  loadingUserState: boolean;
   onUpdateState: (updatedPartial: Partial<UserState>) => void;
   onResetApp: () => void;
   isAppLocked: boolean;
@@ -241,8 +273,22 @@ interface AppLayoutProps {
   logout: () => Promise<void>;
 }
 
-function AppLayout({ user, state, onUpdateState, onResetApp, isAppLocked, setIsAppLocked, handleUnlock, passcodeAttempt, setPasscodeAttempt, passcodeError, setPasscodeError, logout }: AppLayoutProps) {
-  if (!state) return null; // State not loaded yet
+function AppLayout({ user, state, loadingUserState, onUpdateState, onResetApp, isAppLocked, setIsAppLocked, handleUnlock, passcodeAttempt, setPasscodeAttempt, passcodeError, setPasscodeError, logout }: AppLayoutProps) {
+  if (!user) {
+    return <Navigate to="/signin" replace />;
+  }
+
+  if (loadingUserState) {
+    return <LoadingScreen />;
+  }
+
+  if (!state) {
+    return null;
+  }
+
+  if (!state.onboarding?.onboarded) {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   // Passcode Lock Gate
   if (isAppLocked) {
@@ -384,7 +430,10 @@ function AppLayout({ user, state, onUpdateState, onResetApp, isAppLocked, setIsA
             </button>
 
             <button
-              onClick={() => logout()}
+              onClick={async () => {
+                await logout();
+                navigate("/signin");
+              }}
               className="w-full px-4 py-3 rounded-xl text-left text-xs font-semibold flex items-center gap-3 text-rose-700 hover:bg-rose-50 transition-all cursor-pointer mt-4"
             >
               <LogOut className="w-4 h-4" />

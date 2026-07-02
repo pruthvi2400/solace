@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { Heart, Lock, Mail, User } from "lucide-react";
 
@@ -7,7 +8,8 @@ interface SignupPageProps {
 }
 
 export default function SignupPage({ onTogglePage }: SignupPageProps) {
-  const { register, error, clearError } = useAuth();
+  const { register, error, clearError, logout } = useAuth();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,7 +36,9 @@ export default function SignupPage({ onTogglePage }: SignupPageProps) {
     }
 
     const success = await register(name, email, password);
-    if (!success) {
+    if (success) {
+      navigate("/onboarding");
+    } else {
       setSignupError(error || "Signup failed. Please try again with a valid/unique email.");
     }
     setLoading(false);
